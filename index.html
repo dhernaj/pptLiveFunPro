@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tablero de participación</title>
+<style>
+:root{--g:#ffc000;--bg:#f2f2f2;--p:#fff;--k:#111;--m:#666;--ok:#1e8e4e;--no:#c0392b}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,sans-serif;background:var(--bg);color:var(--k)}
+header{display:flex;gap:.6rem;align-items:center;justify-content:space-between;padding:8px 14px;background:var(--k);color:var(--g);flex-wrap:wrap}
+header small,header span{color:#fff;opacity:.85}main{max-width:1200px;margin:0 auto;padding:10px}
+.card{background:var(--p);border-radius:8px;padding:14px;margin:.6rem 0;box-shadow:0 1px 5px #0002}
+#login{max-width:380px;margin:40px auto}input,select{width:100%;padding:8px;margin:4px 0 10px;border:1px solid #bbb;border-radius:6px;font:inherit;background:#fff;color:var(--k)}
+button{background:var(--k);color:var(--g);border:0;padding:8px 14px;border-radius:6px;font:inherit;font-weight:600;cursor:pointer;margin:2px}
+button.pri,button.on{background:var(--g);color:var(--k);outline:2px solid var(--k)}
+.ctl{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}.ctl select{width:auto;margin:0}.ctl label{display:flex;gap:.3rem;align-items:center}
+.tw{overflow:auto;max-height:68vh;border:1px solid #8883;border-radius:6px}
+table{border-collapse:collapse;width:100%;font-size:.85rem}th,td{padding:4px 8px;border-bottom:1px solid #8882;white-space:nowrap;text-align:center}
+th{position:sticky;top:0;background:var(--p);z-index:1}td:first-child,th:first-child{text-align:left;position:sticky;left:0;background:var(--p)}
+[data-s],[data-c]{cursor:pointer}[data-s]:hover,[data-c]:hover{text-decoration:underline}
+.ok{color:var(--ok);font-weight:600}.no{color:var(--no);font-weight:600}.m{color:var(--m)}small{font-size:.75rem}
+.bar{height:12px;background:#eee;border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:#ffc000cc}
+.row{display:grid;grid-template-columns:230px 1fr;gap:.6rem;align-items:center;margin:.2rem 0;font-size:.9rem}
+</style></head><body>
+<header><div><b>Tablero de participación</b><br><small>Ing. Danny Herrera Nájar</small></div><div><span id="st"></span> <button id="out" hidden>Salir</button></div></header>
+<main>
+<div id="login" class="card"><h2>Ingresar (docente)</h2><label>Clave docente<input id="pw" type="password" autocomplete="current-password"></label>
+<button class="pri" id="go">Entrar</button><p id="err" class="no"></p></div>
+<div id="app" hidden>
+ <div class="card ctl"><label>NRC <select id="nrc"></select></label>
+ <label>Orden <select id="ord"><option value="n">Nombre</option><option value="k">Menos ingresos primero</option></select></label>
+ <button id="ref">Actualizar datos</button><button id="exp">Exportar matriz (CSV)</button></div>
+ <details class="card"><summary><b>Salas incluidas</b> <span class="m">(desmarca las de prueba)</span></summary><div id="slist"></div></details>
+ <div id="tabs"><button data-t="m">Matriz</button><button data-t="s">Salas</button><button data-t="a">Alertas</button></div>
+ <div id="view"></div><div id="det"></div></div>
+</main>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script>
+const DOC_EMAIL="docente@funprot.app";
+firebase.initializeApp({apiKey:"AIzaSyBfS-xMNgGV4PwpqX6Wi9P2p4JdrDD1tSU",authDomain:"funprot6.firebaseapp.com",projectId:"funprot6",databaseURL:"https://funprot6-default-rtdb.firebaseio.com"});
+const $=id=>document.getElementById(id),db=firebase.database();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let L={},S=[],inc={},nrc='',ord='n',tab='m',nAl=3,showS=null,showC=null;
+const fecha=t=>t?new Date(t).toLocaleString('es-PE',{dateStyle:'short',timeStyle:'short'}):'sin fecha';
+const ans=(s,c)=>Object.values(s.acts).filter(x=>x.has(c)).length;
+const SS=()=>S.filter(s=>s.g==nrc&&inc[s.id]).sort((a,b)=>(a.t0??1e18)-(b.t0??1e18)||a.id.localeCompare(b.id));
+const studs=()=>Object.entries(L).filter(([c,p])=>p.g==nrc).map(([c,p])=>({c,n:p.n||c}));
+function build(raw){S=Object.entries(raw).map(([id,r])=>{const resp=r.resp||{},ing=r.ingresos||{},pre=r.presencia||{},acts={};
+ Object.entries(resp).forEach(([n,m])=>{acts[n]=new Set(Object.keys(m||{}))});
+ const codes=new Set([...Object.keys(ing),...Object.keys(pre),...Object.values(acts).flatMap(s=>[...s])]);if(!codes.size)return null;
+ const ts=Object.values(ing).filter(Number),t0=ts.length?Math.min(...ts):null,cnt={};
+ codes.forEach(c=>{const g=(L[c]||{}).g||'—';cnt[g]=(cnt[g]||0)+1});
+ return{id,t0,codes,acts,g:Object.entries(cnt).sort((a,b)=>b[1]-a[1])[0][0]}}).filter(Boolean);
+ S.forEach(s=>{if(!(s.id in inc))inc[s.id]=true})}
+async function load(){$('st').textContent='Cargando…';
+ try{const [a,b]=await Promise.all([db.ref('lista').once('value'),db.ref('salas').once('value')]);
+  L={};const v=a.val()||{};for(const c in v)L[c]=typeof v[c]=='object'?v[c]:{n:c,g:String(v[c])};
+  build(b.val()||{});const gs=[...new Set(Object.values(L).map(p=>p.g))].sort(),withS=new Set(S.map(s=>s.g));
+  if(!gs.includes(nrc))nrc=gs.find(g=>withS.has(g))||gs[0]||'';
+  $('nrc').innerHTML=gs.map(g=>`<option ${g==nrc?'selected':''}>${esc(g)}</option>`).join('');
+  $('st').textContent='Actualizado '+new Date().toLocaleTimeString('es-PE');render()}
+ catch(e){$('st').textContent='Error: '+(e.code||e.message)+' (¿reglas publicadas?)'}}
+function render(){
+ $('slist').innerHTML=S.filter(s=>s.g==nrc).sort((a,b)=>(a.t0??1e18)-(b.t0??1e18)).map(s=>`<label style="display:block"><input type="checkbox" data-i="${esc(s.id)}" ${inc[s.id]?'checked':''} style="width:auto;margin:0 .4rem 0 0">${esc(s.id)} · ${fecha(s.t0)} · ${s.codes.size} ingresaron</label>`).join('')||'<p class="m">No hay salas para este NRC.</p>';
+ document.querySelectorAll('#tabs button').forEach(b=>b.className=b.dataset.t==tab?'on':'');
+ $('view').innerHTML=tab=='m'?vMat():tab=='s'?vSalas():vAl();
+ $('det').innerHTML=showS?dSala(S.find(s=>s.id==showS)):showC?dStu(showC):''}
+function vMat(){const ss=SS();if(!ss.length)return'<div class="card">No hay salas incluidas para este NRC.</div>';
+ let rs=studs().map(x=>({...x,k:ss.filter(s=>s.codes.has(x.c)).length}));
+ rs.sort(ord=='k'?(a,b)=>a.k-b.k||a.n.localeCompare(b.n):(a,b)=>a.n.localeCompare(b.n));
+ return`<div class="card"><p class="m"><span class="ok">✓ n</span> ingresó y respondió n actividades · <b>·</b> ingresó sin responder · <span class="no">—</span> no ingresó. Clic en una sala o en un nombre para ver el detalle.</p>
+ <div class="tw"><table><tr><th>Estudiante</th>${ss.map(s=>`<th data-s="${esc(s.id)}">${esc(s.id)}<br><small>${fecha(s.t0)}</small></th>`).join('')}<th>Ingresó a</th></tr>
+ ${rs.map(x=>`<tr><td data-c="${x.c}">${esc(x.n)}</td>${ss.map(s=>{if(!s.codes.has(x.c))return'<td><span class="no">—</span></td>';const n=ans(s,x.c);return n?`<td><span class="ok">✓ ${n}</span></td>`:'<td><b>·</b></td>'}).join('')}<td>${x.k}/${ss.length}</td></tr>`).join('')}</table></div></div>`}
+function vSalas(){const ss=SS();return`<div class="card"><div class="tw"><table><tr><th>Sala</th><th>Fecha</th><th>Ingresaron</th><th>Actividades con respuestas</th></tr>
+ ${ss.map(s=>`<tr><td data-s="${esc(s.id)}">${esc(s.id)}</td><td>${fecha(s.t0)}</td><td>${s.codes.size}</td><td>${Object.keys(s.acts).length}</td></tr>`).join('')||'<tr><td colspan="4">Sin salas</td></tr>'}</table></div></div>`}
+function dSala(s){if(!s)return'';const N=s.codes.size,sl=Object.keys(s.acts).map(Number).sort((a,b)=>a-b),none=[...s.codes].filter(c=>!ans(s,c)).map(c=>(L[c]||{}).n||c).sort();
+ return`<div class="card"><h3>Sala ${esc(s.id)} · NRC ${esc(s.g)}</h3><p>${fecha(s.t0)} · ingresaron <b>${N}</b></p>
+ ${sl.map(n=>{const k=s.acts[n].size,p=Math.round(k/N*100);return`<div class="row"><span>Diap. ${n}: respondieron ${k} de ${N} (${p}%)</span><div class="bar"><i style="width:${p}%"></i></div></div>`}).join('')||'<p class="m">Sin actividades respondidas.</p>'}
+ <h4>Ingresaron y no respondieron nada (${none.length})</h4><p>${none.map(esc).join(' · ')||'—'}</p></div>`}
+function dStu(c){const p=L[c]||{n:c,g:'—'},ss=SS();
+ return`<div class="card"><h3>${esc(p.n)}</h3><p class="m">${esc(c)} · NRC ${esc(p.g)}</p><div class="tw"><table><tr><th>Sala</th><th>Fecha</th><th>Ingresó</th><th>Respondió (diap.)</th><th>Sin responder (diap.)</th></tr>
+ ${ss.map(s=>{const i=s.codes.has(c),ks=Object.keys(s.acts).map(Number).sort((a,b)=>a-b),m=ks.filter(n=>s.acts[n].has(c)),x=i?ks.filter(n=>!s.acts[n].has(c)):[];
+  return`<tr><td data-s="${esc(s.id)}">${esc(s.id)}</td><td>${fecha(s.t0)}</td><td>${i?'<span class="ok">✓</span>':'<span class="no">—</span>'}</td><td>${m.join(', ')||'·'}</td><td>${x.join(', ')||'·'}</td></tr>`}).join('')}</table></div></div>`}
+function vAl(){const ss=SS(),last=ss.slice(-nAl),N=studs();
+ const a=N.filter(x=>!last.some(s=>s.codes.has(x.c))).sort((p,q)=>p.n.localeCompare(q.n));
+ const b=N.map(x=>({...x,k:ss.filter(s=>s.codes.has(x.c)).length,r:ss.filter(s=>ans(s,x.c)>0).length})).filter(x=>x.k>=2&&x.r==0).sort((p,q)=>q.k-p.k||p.n.localeCompare(q.n));
+ const li=(arr,f)=>arr.length?`<div class="tw"><table>${arr.map(x=>`<tr><td data-c="${x.c}">${esc(x.n)}</td><td>${f(x)}</td></tr>`).join('')}</table></div>`:'<p class="ok">Nadie en esta lista.</p>';
+ return`<div class="card"><h3>No ingresaron a las últimas <select id="nal" style="width:auto;display:inline">${[2,3,4,5].map(n=>`<option ${n==nAl?'selected':''}>${n}</option>`).join('')}</select> salas (${a.length})</h3>
+ <p class="m">Salas consideradas: ${last.map(s=>esc(s.id)).join(', ')||'—'}</p>${li(a,x=>`ingresó a ${ss.filter(s=>s.codes.has(x.c)).length} de ${ss.length} salas`)}</div>
+ <div class="card"><h3>Ingresan pero no responden (${b.length})</h3><p class="m">Ingresaron a 2 o más salas y nunca respondieron una actividad.</p>${li(b,x=>`ingresó a ${x.k} salas, 0 respuestas`)}</div>`}
+function csv(){const ss=SS(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',L2=[['codigo','nombre','nrc',...ss.map(s=>s.id),'ingresos']];
+ studs().sort((a,b)=>a.n.localeCompare(b.n)).forEach(x=>L2.push([x.c,x.n,nrc,...ss.map(s=>s.codes.has(x.c)?(ans(s,x.c)||'I'):''),ss.filter(s=>s.codes.has(x.c)).length]));
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+L2.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv'}));a.download='tablero_'+nrc+'.csv';a.click()}
+document.addEventListener('click',e=>{const t=e.target.closest('[data-t],[data-s],[data-c]');if(!t)return;
+ if(t.dataset.t){tab=t.dataset.t;render()}else if(t.dataset.s){showS=t.dataset.s;showC=null;render();$('det').scrollIntoView({behavior:'smooth'})}
+ else if(t.dataset.c){showC=t.dataset.c;showS=null;render();$('det').scrollIntoView({behavior:'smooth'})}});
+document.addEventListener('change',e=>{const t=e.target;
+ if(t.id=='nrc'){nrc=t.value;showS=showC=null;render()}else if(t.id=='ord'){ord=t.value;render()}
+ else if(t.id=='nal'){nAl=+t.value;render()}else if(t.dataset&&t.dataset.i){inc[t.dataset.i]=t.checked;render()}});
+$('ref').onclick=load;$('exp').onclick=csv;$('out').onclick=()=>firebase.auth().signOut();
+$('go').onclick=async()=>{const k=$('pw').value;if(!k)return $('err').textContent='Escriba la clave docente.';
+ try{await firebase.auth().signInWithEmailAndPassword(DOC_EMAIL,k);$('pw').value='';$('err').textContent=''}catch(e){$('err').textContent='Clave incorrecta o docente no creado ('+e.code+').'}};
+firebase.auth().onAuthStateChanged(u=>{const ok=u&&u.email==DOC_EMAIL;$('login').hidden=ok;$('app').hidden=!ok;$('out').hidden=!ok;if(ok)load()});
+</script></body></html>
