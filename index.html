@@ -42,8 +42,10 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 let L={},S=[],inc={},nrc='',ord='n',tab='m',nAl=3,showS=null,showC=null;
 const fecha=t=>t?new Date(t).toLocaleString('es-PE',{dateStyle:'short',timeStyle:'short'}):'sin fecha';
 const ans=(s,c)=>Object.values(s.acts).filter(x=>x.has(c)).length;
-const SS=()=>S.filter(s=>s.g==nrc&&inc[s.id]).sort((a,b)=>(a.t0??1e18)-(b.t0??1e18)||a.id.localeCompare(b.id));
-const studs=()=>Object.entries(L).filter(([c,p])=>p.g==nrc).map(([c,p])=>({c,n:p.n||c}));
+const SS=()=>S.filter(s=>(nrc=='*'||s.g==nrc)&&inc[s.id]).sort((a,b)=>(a.t0??1e18)-(b.t0??1e18)||a.id.localeCompare(b.id));
+const studs=()=>Object.entries(L).filter(([c,p])=>nrc=='*'||p.g==nrc).map(([c,p])=>({c,n:p.n||c,g:p.g}));
+const own=x=>nrc=='*'?SS().filter(s=>s.g==x.g):SS();
+const byN=(a,b)=>nrc=='*'?String(a.g).localeCompare(b.g)||a.n.localeCompare(b.n):a.n.localeCompare(b.n);
 function build(raw){S=Object.entries(raw).map(([id,r])=>{const resp=r.resp||{},ing=r.ingresos||{},pre=r.presencia||{},acts={};
  Object.entries(resp).forEach(([n,m])=>{acts[n]=new Set(Object.keys(m||{}))});
  const codes=new Set([...Object.keys(ing),...Object.keys(pre),...Object.values(acts).flatMap(s=>[...s])]);if(!codes.size)return null;
@@ -55,41 +57,42 @@ async function load(){$('st').textContent='Cargando…';
  try{const [a,b]=await Promise.all([db.ref('lista').once('value'),db.ref('salas').once('value')]);
   L={};const v=a.val()||{};for(const c in v)L[c]=typeof v[c]=='object'?v[c]:{n:c,g:String(v[c])};
   build(b.val()||{});const gs=[...new Set(Object.values(L).map(p=>p.g))].sort(),withS=new Set(S.map(s=>s.g));
-  if(!gs.includes(nrc))nrc=gs.find(g=>withS.has(g))||gs[0]||'';
-  $('nrc').innerHTML=gs.map(g=>`<option ${g==nrc?'selected':''}>${esc(g)}</option>`).join('');
+  if(nrc!='*'&&!gs.includes(nrc))nrc=gs.find(g=>withS.has(g))||gs[0]||'';
+  $('nrc').innerHTML='<option value="*" '+(nrc=='*'?'selected':'')+'>Todos los NRC</option>'+gs.map(g=>`<option ${g==nrc?'selected':''}>${esc(g)}</option>`).join('');
   $('st').textContent='Actualizado '+new Date().toLocaleTimeString('es-PE');render()}
  catch(e){$('st').textContent='Error: '+(e.code||e.message)+' (¿reglas publicadas?)'}}
 function render(){
- $('slist').innerHTML=S.filter(s=>s.g==nrc).sort((a,b)=>(a.t0??1e18)-(b.t0??1e18)).map(s=>`<label style="display:block"><input type="checkbox" data-i="${esc(s.id)}" ${inc[s.id]?'checked':''} style="width:auto;margin:0 .4rem 0 0">${esc(s.id)} · ${fecha(s.t0)} · ${s.codes.size} ingresaron</label>`).join('')||'<p class="m">No hay salas para este NRC.</p>';
+ $('slist').innerHTML=S.filter(s=>nrc=='*'||s.g==nrc).sort((a,b)=>(a.t0??1e18)-(b.t0??1e18)).map(s=>`<label style="display:block"><input type="checkbox" data-i="${esc(s.id)}" ${inc[s.id]?'checked':''} style="width:auto;margin:0 .4rem 0 0">${esc(s.id)} · NRC ${esc(s.g)} · ${fecha(s.t0)} · ${s.codes.size} ingresaron</label>`).join('')||'<p class="m">No hay salas para este NRC.</p>';
  document.querySelectorAll('#tabs button').forEach(b=>b.className=b.dataset.t==tab?'on':'');
  $('view').innerHTML=tab=='m'?vMat():tab=='s'?vSalas():vAl();
  $('det').innerHTML=showS?dSala(S.find(s=>s.id==showS)):showC?dStu(showC):''}
-function vMat(){const ss=SS();if(!ss.length)return'<div class="card">No hay salas incluidas para este NRC.</div>';
- let rs=studs().map(x=>({...x,k:ss.filter(s=>s.codes.has(x.c)).length}));
- rs.sort(ord=='k'?(a,b)=>a.k-b.k||a.n.localeCompare(b.n):(a,b)=>a.n.localeCompare(b.n));
- return`<div class="card"><p class="m"><span class="ok">✓ n</span> ingresó y respondió n actividades · <b>·</b> ingresó sin responder · <span class="no">—</span> no ingresó. Clic en una sala o en un nombre para ver el detalle.</p>
- <div class="tw"><table><tr><th>Estudiante</th>${ss.map(s=>`<th data-s="${esc(s.id)}">${esc(s.id)}<br><small>${fecha(s.t0)}</small></th>`).join('')}<th>Ingresó a</th></tr>
- ${rs.map(x=>`<tr><td data-c="${x.c}">${esc(x.n)}</td>${ss.map(s=>{if(!s.codes.has(x.c))return'<td><span class="no">—</span></td>';const n=ans(s,x.c);return n?`<td><span class="ok">✓ ${n}</span></td>`:'<td><b>·</b></td>'}).join('')}<td>${x.k}/${ss.length}</td></tr>`).join('')}</table></div></div>`}
-function vSalas(){const ss=SS();return`<div class="card"><div class="tw"><table><tr><th>Sala</th><th>Fecha</th><th>Ingresaron</th><th>Actividades con respuestas</th></tr>
- ${ss.map(s=>`<tr><td data-s="${esc(s.id)}">${esc(s.id)}</td><td>${fecha(s.t0)}</td><td>${s.codes.size}</td><td>${Object.keys(s.acts).length}</td></tr>`).join('')||'<tr><td colspan="4">Sin salas</td></tr>'}</table></div></div>`}
+function vMat(){const ss=SS(),T=nrc=='*';if(!ss.length)return'<div class="card">No hay salas incluidas.</div>';
+ let rs=studs().map(x=>({...x,k:own(x).filter(s=>s.codes.has(x.c)).length,N:own(x).length}));
+ rs.sort(ord=='k'?(a,b)=>a.k-b.k||byN(a,b):byN);
+ return`<div class="card"><p class="m"><span class="ok">✓ n</span> ingresó y respondió n actividades · <b>·</b> ingresó sin responder · <span class="no">—</span> no ingresó${T?' · celda gris: sala de otro NRC (no aplica)':''}. Clic en una sala o en un nombre para ver el detalle.</p>
+ <div class="tw"><table><tr><th>Estudiante</th>${T?'<th>NRC</th>':''}${ss.map(s=>`<th data-s="${esc(s.id)}">${esc(s.id)}<br><small>${T?'NRC '+esc(s.g)+' · ':''}${fecha(s.t0)}</small></th>`).join('')}<th>Ingresó a</th></tr>
+ ${rs.map(x=>`<tr><td data-c="${x.c}">${esc(x.n)}</td>${T?`<td>${esc(x.g)}</td>`:''}${ss.map(s=>{if(T&&s.g!=x.g)return'<td style="background:#eee"></td>';if(!s.codes.has(x.c))return'<td><span class="no">—</span></td>';const n=ans(s,x.c);return n?`<td><span class="ok">✓ ${n}</span></td>`:'<td><b>·</b></td>'}).join('')}<td>${x.k}/${x.N}</td></tr>`).join('')}</table></div></div>`}
+function vSalas(){const ss=SS();return`<div class="card"><div class="tw"><table><tr><th>Sala</th><th>NRC</th><th>Fecha</th><th>Ingresaron</th><th>Actividades con respuestas</th></tr>
+ ${ss.map(s=>`<tr><td data-s="${esc(s.id)}">${esc(s.id)}</td><td>${esc(s.g)}</td><td>${fecha(s.t0)}</td><td>${s.codes.size}</td><td>${Object.keys(s.acts).length}</td></tr>`).join('')||'<tr><td colspan="5">Sin salas</td></tr>'}</table></div></div>`}
 function dSala(s){if(!s)return'';const N=s.codes.size,sl=Object.keys(s.acts).map(Number).sort((a,b)=>a-b),none=[...s.codes].filter(c=>!ans(s,c)).map(c=>(L[c]||{}).n||c).sort();
  return`<div class="card"><h3>Sala ${esc(s.id)} · NRC ${esc(s.g)}</h3><p>${fecha(s.t0)} · ingresaron <b>${N}</b></p>
  ${sl.map(n=>{const k=s.acts[n].size,p=Math.round(k/N*100);return`<div class="row"><span>Diap. ${n}: respondieron ${k} de ${N} (${p}%)</span><div class="bar"><i style="width:${p}%"></i></div></div>`}).join('')||'<p class="m">Sin actividades respondidas.</p>'}
  <h4>Ingresaron y no respondieron nada (${none.length})</h4><p>${none.map(esc).join(' · ')||'—'}</p></div>`}
-function dStu(c){const p=L[c]||{n:c,g:'—'},ss=SS();
+function dStu(c){const p=L[c]||{n:c,g:'—'},ss=own({g:p.g});
  return`<div class="card"><h3>${esc(p.n)}</h3><p class="m">${esc(c)} · NRC ${esc(p.g)}</p><div class="tw"><table><tr><th>Sala</th><th>Fecha</th><th>Ingresó</th><th>Respondió (diap.)</th><th>Sin responder (diap.)</th></tr>
  ${ss.map(s=>{const i=s.codes.has(c),ks=Object.keys(s.acts).map(Number).sort((a,b)=>a-b),m=ks.filter(n=>s.acts[n].has(c)),x=i?ks.filter(n=>!s.acts[n].has(c)):[];
   return`<tr><td data-s="${esc(s.id)}">${esc(s.id)}</td><td>${fecha(s.t0)}</td><td>${i?'<span class="ok">✓</span>':'<span class="no">—</span>'}</td><td>${m.join(', ')||'·'}</td><td>${x.join(', ')||'·'}</td></tr>`}).join('')}</table></div></div>`}
-function vAl(){const ss=SS(),last=ss.slice(-nAl),N=studs();
- const a=N.filter(x=>!last.some(s=>s.codes.has(x.c))).sort((p,q)=>p.n.localeCompare(q.n));
- const b=N.map(x=>({...x,k:ss.filter(s=>s.codes.has(x.c)).length,r:ss.filter(s=>ans(s,x.c)>0).length})).filter(x=>x.k>=2&&x.r==0).sort((p,q)=>q.k-p.k||p.n.localeCompare(q.n));
- const li=(arr,f)=>arr.length?`<div class="tw"><table>${arr.map(x=>`<tr><td data-c="${x.c}">${esc(x.n)}</td><td>${f(x)}</td></tr>`).join('')}</table></div>`:'<p class="ok">Nadie en esta lista.</p>';
+function vAl(){const T=nrc=='*',N=studs();
+ const a=N.filter(x=>{const o=own(x);return o.length&&!o.slice(-nAl).some(s=>s.codes.has(x.c))}).sort(byN);
+ const b=N.map(x=>{const o=own(x);return{...x,k:o.filter(s=>s.codes.has(x.c)).length,r:o.filter(s=>ans(s,x.c)>0).length,t:o.length}}).filter(x=>x.k>=2&&x.r==0).sort((p,q)=>q.k-p.k||byN(p,q));
+ const li=(arr,f)=>arr.length?`<div class="tw"><table>${arr.map(x=>`<tr><td data-c="${x.c}">${esc(x.n)}</td>${T?`<td>NRC ${esc(x.g)}</td>`:''}<td>${f(x)}</td></tr>`).join('')}</table></div>`:'<p class="ok">Nadie en esta lista.</p>';
+ const last=SS().slice(-nAl);
  return`<div class="card"><h3>No ingresaron a las últimas <select id="nal" style="width:auto;display:inline">${[2,3,4,5].map(n=>`<option ${n==nAl?'selected':''}>${n}</option>`).join('')}</select> salas (${a.length})</h3>
- <p class="m">Salas consideradas: ${last.map(s=>esc(s.id)).join(', ')||'—'}</p>${li(a,x=>`ingresó a ${ss.filter(s=>s.codes.has(x.c)).length} de ${ss.length} salas`)}</div>
+ <p class="m">${T?'Se cuentan las últimas salas de su propio NRC.':'Salas consideradas: '+(last.map(s=>esc(s.id)).join(', ')||'—')}</p>${li(a,x=>{const o=own(x);return`ingresó a ${o.filter(s=>s.codes.has(x.c)).length} de ${o.length} salas`})}</div>
  <div class="card"><h3>Ingresan pero no responden (${b.length})</h3><p class="m">Ingresaron a 2 o más salas y nunca respondieron una actividad.</p>${li(b,x=>`ingresó a ${x.k} salas, 0 respuestas`)}</div>`}
-function csv(){const ss=SS(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',L2=[['codigo','nombre','nrc',...ss.map(s=>s.id),'ingresos']];
- studs().sort((a,b)=>a.n.localeCompare(b.n)).forEach(x=>L2.push([x.c,x.n,nrc,...ss.map(s=>s.codes.has(x.c)?(ans(s,x.c)||'I'):''),ss.filter(s=>s.codes.has(x.c)).length]));
- const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+L2.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv'}));a.download='tablero_'+nrc+'.csv';a.click()}
+function csv(){const ss=SS(),q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',L2=[['codigo','nombre','nrc',...ss.map(s=>s.id+' (NRC '+s.g+')'),'ingresos']];
+ studs().sort(byN).forEach(x=>L2.push([x.c,x.n,x.g,...ss.map(s=>nrc=='*'&&s.g!=x.g?'n/a':s.codes.has(x.c)?(ans(s,x.c)||'I'):''),own(x).filter(s=>s.codes.has(x.c)).length]));
+ const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+L2.map(r=>r.map(q).join(',')).join('\n')],{type:'text/csv'}));a.download='tablero_'+(nrc=='*'?'todos':nrc)+'.csv';a.click()}
 document.addEventListener('click',e=>{const t=e.target.closest('[data-t],[data-s],[data-c]');if(!t)return;
  if(t.dataset.t){tab=t.dataset.t;render()}else if(t.dataset.s){showS=t.dataset.s;showC=null;render();$('det').scrollIntoView({behavior:'smooth'})}
  else if(t.dataset.c){showC=t.dataset.c;showS=null;render();$('det').scrollIntoView({behavior:'smooth'})}});
